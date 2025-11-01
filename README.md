@@ -18,5 +18,6 @@ python game.py
 * Press **Space** or the **Up Arrow** to flap.
 * Avoid colliding with pipes or the ground.
 * After a crash, press **Space** to restart.
+* Procedurally generated chiptune-style background music plays while you fly (if your system audio driver is available).
 
 Enjoy, and see how high you can score!

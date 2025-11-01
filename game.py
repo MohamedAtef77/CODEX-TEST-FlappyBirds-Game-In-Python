@@ -8,8 +8,10 @@ space.
 
 from __future__ import annotations
 
+import math
 import random
-from typing import List, Tuple
+from array import array
+from typing import List, Optional, Tuple
 
 import pygame
 
@@ -219,6 +221,10 @@ class Game:
         self.font_small = make_font(24)
         self.background = self._create_background()
         self.high_score = 0
+        self.music_available = False
+        self.music_sound: Optional[pygame.mixer.Sound] = None
+        self.music_channel: Optional[pygame.mixer.Channel] = None
+        self._setup_audio()
         self.reset()
 
     def reset(self) -> None:
@@ -228,6 +234,18 @@ class Game:
         self.spawn_pipe(initial=True)
         self.score = 0
         self.state = "start"
+        if self.music_sound and (self.music_channel is None or not self.music_channel.get_busy()):
+            try:
+                channel = self.music_sound.play(loops=-1)
+            except pygame.error:
+                self.music_sound = None
+                self.music_available = False
+                self.music_channel = None
+            else:
+                if channel is not None:
+                    channel.set_volume(0.35)
+                    self.music_channel = channel
+                    self.music_available = True
 
     def spawn_pipe(self, *, initial: bool = False) -> None:
         min_center = PIPE_GAP // 2 + 60
@@ -321,6 +339,87 @@ class Game:
             self.draw_score()
 
         pygame.display.flip()
+
+    def _setup_audio(self) -> None:
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init(frequency=44100, size=-16, channels=2)
+        except pygame.error:
+            return
+
+        sound = self._generate_background_music()
+        if sound is None:
+            return
+
+        try:
+            channel = sound.play(loops=-1)
+        except pygame.error:
+            channel = None
+
+        self.music_sound = sound
+        if channel is not None:
+            channel.set_volume(0.35)
+            self.music_channel = channel
+            self.music_available = True
+
+    def _generate_background_music(self) -> Optional[pygame.mixer.Sound]:
+        if not pygame.mixer.get_init():
+            return None
+
+        init_args = pygame.mixer.get_init()
+        if init_args is None:
+            return None
+        sample_rate = init_args[0]
+
+        tempo = 120  # beats per minute
+        seconds_per_beat = 60.0 / tempo
+        beat_resolution = 2  # subdivide beats into eighth-notes
+        samples_per_subbeat = max(1, int(sample_rate * seconds_per_beat / beat_resolution))
+
+        chords = [
+            ([60, 64, 67], 8),  # C major
+            ([57, 60, 64], 8),  # A minor
+            ([62, 65, 69], 8),  # D minor
+            ([55, 59, 62], 8),  # G major
+        ]
+
+        melody = [60, 62, 64, 65, 67, 69, 71, 72]
+
+        def midi_to_freq(note: int) -> float:
+            return 440.0 * 2 ** ((note - 69) / 12)
+
+        audio = array("h")
+        sample_index = 0
+        melody_step = 0
+
+        for chord_notes, subbeats in chords:
+            for subbeat in range(subbeats):
+                chord_freqs = [midi_to_freq(note) for note in chord_notes]
+                melody_note = melody[melody_step % len(melody)]
+                melody_freq = midi_to_freq(melody_note)
+
+                for _ in range(samples_per_subbeat):
+                    t = sample_index / sample_rate
+                    chord_sample = sum(math.sin(2 * math.pi * freq * t) for freq in chord_freqs)
+                    melody_sample = math.sin(2 * math.pi * melody_freq * t)
+                    wobble = math.sin(2 * math.pi * 5 * t)
+                    sample_value = 0.18 * chord_sample + 0.12 * melody_sample + 0.03 * wobble
+                    sample_value = max(-1.0, min(1.0, sample_value))
+                    int_sample = int(sample_value * 32767)
+                    audio.append(int_sample)
+                    audio.append(int_sample)
+                    sample_index += 1
+
+                melody_step += 1
+
+        if not audio:
+            return None
+
+        audio_bytes = audio.tobytes()
+        try:
+            return pygame.mixer.Sound(buffer=audio_bytes)
+        except pygame.error:
+            return None
 
     def _create_background(self) -> pygame.Surface:
         gradient_surface = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
